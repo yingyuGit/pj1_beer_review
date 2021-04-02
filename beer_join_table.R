@@ -32,11 +32,6 @@ pattern <- c("^County\\s+|^Co.\\s+")
 breweries_in_IE$city <- str_replace_all(breweries_in_IE$city, pattern, "") %>% 
   str_trim(., side = "both")
 
-
-# #filter reviews for beer is produced in Ireland
-# beer_ids <- beers_from_IE$beer_id
-# reviews_IE <- reviews %>% filter(beer_id %in% beer_ids) 
-
 # join tables
 beer_reviews_IE <- left_join(beers_from_IE, reviews, by='beer_id') %>%
   left_join(., breweries_in_IE, by='brewery_id') %>%
