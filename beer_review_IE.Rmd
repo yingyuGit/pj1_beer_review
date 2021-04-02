@@ -1,0 +1,181 @@
+---
+title: "Report on beer reviews"
+author: "Nan"
+date: "4/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Popular Irish Beers
+My description comes here.
+
+```{r lib, message=FALSE}
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(tidytext)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+```
+
+
+```{r import_data}
+# import data
+beer_reviews <- read.csv("data/breweries_reviews_IE.csv", stringsAsFactors = FALSE)
+```
+
+
+```{r popular_beer_data, message=FALSE}
+########### The most-reviewed Irish beer analysis ###########
+# The most-reviewed and highly rated Irish beers
+popular_irish_beers <- beer_reviews %>%
+  group_by(style, beer_name) %>%
+  mutate(review_num = n(), avg_score = mean(score)) %>%
+  filter(review_num >= 300 & avg_score >= 3.5) %>%
+  ungroup() 
+```
+
+
+```{r popular_beer_plot, echo=FALSE, message=FALSE, warning=FALSE, out.width="85%"}
+# Plot the most-reviewed and highly rated Irish beers
+popular_irish_beers %>%
+  ggplot(aes(x = review_num, y = avg_score, col=style, shape = factor(city))) +
+  geom_point() +
+  labs(
+    title = "The most-reviewed and highly rated Irish beers",
+    x = "Number of Reviews",
+    y = "Average Review Scores",
+    color = "Beer Styles",
+    shape = "City of the brewary"
+  ) +
+  geom_text(aes(review_num, avg_score, label = beer_name), vjust = 0, nudge_y = 0.03, size = 2) +
+  ylim(3.5, 4.25) +
+  xlim(100, 1500) +
+  theme(axis.title = element_text(size = 10),
+        axis.text.x = element_text(size = 8, angle = 45, hjust = 1), 
+        legend.justification = "top",
+        legend.title = element_text(color = "#2A363B", size = 8, face = "bold"),
+        legend.text = element_text(color = "#2A363B", size = 8))
+```
+
+```{r beer_words_tfidf}
+########### The most-reviewed beer styles analysis ###########
+# Five most-reviewed beer styles
+styles5 <- beer_reviews %>% 
+  group_by(style) %>%
+  summarise(review_num = n()) %>%
+  mutate(style = reorder(style, review_num)) %>%
+  arrange(desc(review_num)) %>% 
+  top_n(5, review_num) 
+
+# subset data for the five most-reviewed beer styles
+beer_reviews_sub <- subset(beer_reviews, style %in% styles5$style)
+
+# count words in the five most-reviewed beer styles
+beer_words <- beer_reviews_sub %>% 
+  unnest_tokens(word, text) %>% 
+  filter(!word %in% stop_words$word & !str_detect(word, "^[+-]?([0-9]*[.])?[0-9]+")) %>%
+  count(style, word, sort=TRUE) 
+
+# remove words from beer names
+exceptions <- c("dark", "light", "fancy", "long", "special", "black", "crafty", "plain")
+words_in_beernames <- paste(gsub("[[:punct:]]", "", beer_reviews_sub$beer_name)) %>% 
+  tolower() %>%
+  strsplit(" | \ ") %>%
+  unlist() %>%
+  unique() %>%
+  c("beer", "craft", "ipa's", "smithwick's", "killian's", "killians","reds","o’hara","Macardle's") %>%
+  subset(!. %in% exceptions) %>%
+  sort()
+
+# find most distinctive the words to each style
+beer_words_tfidf <- beer_words %>%
+  filter(!word %in% words_in_beernames) %>%
+  group_by(word) %>%
+  mutate(word_num = sum(n)) %>%
+  bind_tf_idf(word, style, n) %>%
+  subset(tf_idf > 0) %>%
+  arrange(desc(tf_idf))
+
+# find top 10 tf_idf words in each style 
+beer_words_tfidf_10 <- beer_words_tfidf %>%
+  subset(word_num >= 10) %>% 
+  group_by(style) %>%
+  top_n(10, tf_idf) %>%
+  arrange(style, desc(tf_idf)) %>%
+  head(., 50) %>%
+  ungroup() %>%
+  mutate(rank = rep(10:1, 5))
+
+```
+
+```{r beer_words_tfidf_plot, echo=FALSE, out.width="70%"}
+# plot tf_idf by styles
+beer_words_tfidf_10 %>% 
+  ggplot(aes(as.factor(rank), tf_idf)) +
+  geom_bar(stat = "identity", fill="#99B898", alpha=0.5) +
+  coord_flip() +
+  facet_wrap(~ style, ncol=5) + 
+  geom_text(aes(label=word, x=rank), y=0,hjust=0) +
+  labs(title="Popular words for five most-reviewed Irish beer styles", x="", y="tf-idf") +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank(),
+        panel.background = element_rect(fill = "white", colour = "grey50"),
+        panel.spacing = unit(1, "lines")
+        )   
+```
+
+```{r correaltion}
+########### Correlation between each feature to the total score ###########
+beer_reviews_scores <- beer_reviews %>%
+  select("beer_id","style", "look", "smell","taste", "feel","overall") %>%
+  subset(., style %in% styles5$style)
+
+#find correlation between each characteristics 
+cor(beer_reviews_scores[, c(3,4,5,6,7)], method = c("pearson", "kendall", "spearman"))
+```
+
+```{r correlation_plot, echo=FALSE, out.width="70%", warning=FALSE, message=FALSE}
+# Taste and Overall has a high correlation, but not for all beer styles.
+beer_reviews_scores %>%
+  ggplot(aes(taste, overall)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE) +
+  facet_wrap(~style)
+```
+
+
+```{r beer_characteristics_data}
+#transform data by beer characteristics
+beer_reviews_scores_T <- beer_reviews_scores %>% 
+  gather(., "feature", "scores", -c(beer_id, style)) 
+```
+
+
+```{r beer_characteristics_plot, echo=FALSE, out.width="70%"}
+# plot beer characteristics data
+beer_reviews_scores_T %>%  
+  ggplot(aes(feature, scores, col=style)) + 
+  geom_boxplot() +
+  labs(
+   title = "Comparison of beer characteristics among most-reviewed Irish beer styles",
+   x = "Beer characteristics ",
+   y = "Review Scores",
+   color = "Beer Styles") +
+  theme(axis.title = element_text(size = 10), 
+        legend.justification = "top",
+        legend.title = element_text(color = "#2A363B", size = 8, face = "bold"),
+        legend.text = element_text(color = "#2A363B", size = 8),
+        legend.position = "top",
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major = element_line(colour = "grey90"),
+        )
+```
+
+
